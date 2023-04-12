@@ -76,7 +76,6 @@ $phase1
          || ((priority == 2) && !C2_request && !C3_request && !C4_request)) )
      {
 	BusGrant1 = true; 
-//printf("BUS: setting BusGrant1 = true\n");
 	C1_request = false;
  	BusBusy = true;
 	priority = 2;
@@ -87,7 +86,6 @@ $phase1
          || ((priority == 3) && !C3_request && !C4_request && !C1_request)) )
      {
 	BusGrant2 = true; 
-//printf("BUS: setting BusGrant2 = true\n");
 	C2_request = false;
  	BusBusy = true;
 	priority = 3;
@@ -100,7 +98,6 @@ $phase1
          || ((priority == 4) && !C2_request && !C1_request && !C2_request)) )
      {
 	BusGrant3 = true; 
-//printf("BUS: setting BusGrant3 = true\n");
 	C3_request = false;
  	BusBusy = true;
 	priority = 4;
@@ -111,7 +108,6 @@ $phase1
          || ((priority == 1) && !C1_request && !C2_request && !C3_request)) )
      {
 	BusGrant4 = true; 
-//printf("BUS: setting BusGrant4 = true\n");
 	C4_request = false;
  	BusBusy = true;
 	priority = 1;
@@ -144,7 +140,17 @@ $phase1
 	 }
      }
 
-    if (ev.type() == WRITE_MEM_PKT)						// send to all outputs except source
+    if (ev.type() == INVALIDATE_PKT)						// send to all outputs except source
+     {
+	SIM_CAST(t_read_mem, read_request, ev);	
+	for (i=0; i<output_size; i++)
+         {
+	  if (i != read_request.source)
+	   {send_INVALIDATE_PKT(output[i], read_request);}
+	 }
+     }
+ 
+   if (ev.type() == WRITE_MEM_PKT)						// send to all outputs except source
      {
 	SIM_CAST(t_write_mem, write_request, ev);
 	for (i=0; i<output_size; i++)

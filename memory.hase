@@ -44,6 +44,9 @@ $phase0
   The Memory returns a Read Response (RR) packet to the bus containing the requested data
   and with the same source address as that in the incoming packet.
 */
+      if (strcmp(read_request.instr,"MR") == 0)		// ignore if IV or RR
+       {	
+	my_state = MEMORY_BUSY;
 	strcpy(read_reply.instr,"RR");
 	address = read_request.addr;
 	mem_buff = data_mem[address];
@@ -54,12 +57,15 @@ $phase0
 	read_reply.source = read_request.source;
 	send_read_reply = true;
 	access_time = 4;
+//	access_time = 1;
 	reads ++;
+       }
      }		// end of read packet
 
     if (ev.type() == WRITE_MEM_PKT)
      {
 	SIM_CAST_DEL(t_write_mem, write_request,ev);
+	my_state = MEMORY_BUSY;
 
 // The Memory writes the incoming data and sends an ACK packet to the bus
 
@@ -74,11 +80,11 @@ $phase0
 	write_reply.source = write_request.source;
 	send_write_reply = true;
 	access_time = 4;
+//	access_time = 1;
 	writes ++;
        }		// end of write packet
-  my_state = MEMORY_BUSY;
   }
-  dump_state();
+  dump_state_i();
 
 $phase1
 
