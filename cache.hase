@@ -1,11 +1,11 @@
-// Project:	Snoopy Cache Coherence V5: Write Through / Write Invalidate/ Write Allocate
+// Project:	Snoopy Cache Coherence V6: Write Through / Write Update/ Write Allocate
 // Entity	Cache
 // File	cache.hase
-// Date:	Dec 2006, revised Nov 2010,  Apr 2019
+// Date:	Dec 2006, revised Nov 2010,  Mar 2019
 // Author:	Roland Ibbett
 
 /* 
-Each line in the cache contains the following (integer) fields in each of its  lines:
+Each line in the cache contains the following (integer) fields in each of its lines:
 Valid
 Address
 Data0
@@ -23,9 +23,9 @@ Source: Number of the originating cache
 Instruction, which can be one of the following:
 
 MR	Memory Read Request
-RR	Read Response from Memory - includes data
+RR	Memory Read Response - includes data
 MW	Memory Write Request
-WR	Write Response from Memory
+WR	Memory Write Response
 
 A cache receives packets from its processor and from the bus.
 A packet from a processor can be a read request or a write request.
@@ -43,7 +43,7 @@ WM		- Write Allocate, so first  issue Memory Read (MR)
 		- Write data to memory
 		- when memory replies (WR), update cache and send acknowledge to processor
 
-MW	pkt	- if address matches a valid line, invalidate that line
+MW	pkt	- if address matches a valid line, update that line
 
 */
 
@@ -75,7 +75,7 @@ int old_state;
 t_cache_struct cache_buff, bus_buff;
 t_mem_trace pkt_from_proc;
 t_read_mem bus_read_request, ignored_pkt;
-t_write_mem bus_write_request, invalidate_request;
+t_write_mem bus_write_request, update_request;
 t_read_reply read_reply;
 t_write_reply write_reply;
 
@@ -83,7 +83,7 @@ void handle_read();
 void handle_write();
 void handle_read_reply();
 void handle_write_reply();
-void invalidate();
+void update();
 void recheck_cache();
 
 $class_defs
@@ -207,12 +207,12 @@ void cache::handle_write()
 
 void cache::handle_read_reply()
 {
-
-// 	When an RR packet is received, the data is copied into cache_buff.
-//	If the reply is for a Read Request, the data in cache_buff is written to the selected line cache
-//	and the required value from within the line is forwarded to the processor.
-//	Otherwise the reply is for a Write Allocate request, so cache_buff is updated with the value from proc
-
+/*
+ 	When an RR packet is received, the data is copied into cache_buff.
+	If the reply is for a Read Request, the data in cache_buff is written to the selected line cache
+	and the required value from within the line is forwarded to the processor.
+	Otherwise the reply is for a Write Allocate request, so cache_buff is updated with the value from proc
+*/
 	 cache_buff.valid = 1;
 	 cache_buff.address = proc_line_address;
 	 cache_buff.data0 = read_reply.data0;
@@ -285,18 +285,21 @@ void cache::handle_write_reply()
   BusMaster = false;
  }									// end of handle_write_reply
 
-void cache::invalidate()					// invalidate a matching line if it's valid 
+void cache::update()					// update a matching line if it's valid 
 {
-  bus_line_address = invalidate_request.addr;
+  bus_line_address = update_request.addr;
   bus_cache_line = bus_line_address & line_mask;
   bus_buff = cache_mem[bus_cache_line];
   if ( (bus_buff.address == bus_line_address) && (bus_buff.valid == 1) )
    {
     old_state = my_state;
-    strcpy(Status, "INV");
-    my_state = CACHE_INV;
+    strcpy(Status, "UPD");
+    my_state = CACHE_UPD;
     dump_state_i();
-    bus_buff.valid = 0;
+    bus_buff.data0 = update_request.data0;
+    bus_buff.data1 = update_request.data1;
+    bus_buff.data2 = update_request.data2;
+    bus_buff.data3 = update_request.data3;
     cache_mem.Update(bus_cache_line, bus_buff);
     if (read_request || write_request)
      {
@@ -338,7 +341,7 @@ myBus = (bus*)sim.get_entity(sim.get_entity_id("BUS"));
   read_hit = false;
   write_request = false;
   write_hit = false;
-  write_request = false;  no_request = false;
+  no_request = false;
   send_r_to_bus = false;
   send_w_to_bus = false;
   send_to_proc = false;
@@ -382,10 +385,10 @@ $phase0
     if (ev.type() == READ_MEM_PKT)						// ignore
      {SIM_CAST_DEL(t_read_mem, ignored_pkt,ev);}
 
-    if (ev.type() == WRITE_MEM_PKT)						//invalidate a valid matching entry
+    if (ev.type() == WRITE_MEM_PKT)						//update a valid matching entry
      {
-	SIM_CAST_DEL(t_write_mem, invalidate_request,ev);
-	invalidate();
+	SIM_CAST_DEL(t_write_mem, update_request,ev);
+	update();
      }
     if (ev.type() == READ_REPLY_PKT)						// update cache if source = own_no
      {
@@ -490,7 +493,7 @@ $phase1
 	hits ++;
 	read_hit = false;
 	write_hit = false;
-       }
+        }
        send_to_proc = false;
       }
   if (no_request || (nodes_done == 4))
