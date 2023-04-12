@@ -57,6 +57,7 @@ $phase0
 	current_line=mem_trace[TC];
 	action = (char) current_line.instr[0];
 	waiting = false;
+	dump_state();
   }
 
   if (!waiting)

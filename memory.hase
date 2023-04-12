@@ -1,7 +1,7 @@
 // Project:		Snoopy Cache Coherence
 // Entity		Memory
 // File		memory.hase
-// Date:		Sept 2006, modified Apr 2019
+// Date:		Sept 2006, modified Feb 2019
 // Author:		Roland Ibbett
 
 // The Memory receives Read and Write requests from the caches.
@@ -11,7 +11,7 @@ $class_decls
 
 bool send_read_reply, send_write_reply;
 char instr[5];
-int access_time, addr, word_select;
+int access_time, address, word_select;
 int reads, writes;
 
 t_mem_struct data_in, mem_buff;
@@ -40,16 +40,17 @@ $phase0
     if (ev.type() == READ_MEM_PKT)
      {
 	SIM_CAST_DEL(t_read_mem, read_request,ev);
-
-//  The Memory returns a Read Response (RR) packet to the bus containing the requested data
-//  and with the same source address as that in the incoming packet.
-
-	addr = read_request.addr >> 2;
+/* 
+  The Memory returns a Read Response (RR) packet to the bus containing the requested data
+  and with the same source address as that in the incoming packet.
+*/
 	strcpy(read_reply.instr,"RR");
-	read_reply.data0 = data_mem[addr].data0;
-	read_reply.data1 = data_mem[addr].data1;
-	read_reply.data2 = data_mem[addr].data2;
-	read_reply.data3 = data_mem[addr].data3;
+	address = read_request.addr;
+	mem_buff = data_mem[address];
+	read_reply.data0 = mem_buff.data0;
+	read_reply.data1 = mem_buff.data1;
+	read_reply.data2 = mem_buff.data2;
+	read_reply.data3 = mem_buff.data3;
 	read_reply.source = read_request.source;
 	send_read_reply = true;
 	access_time = 4;
@@ -62,25 +63,13 @@ $phase0
 
 // The Memory writes the incoming data and sends an ACK packet to the bus
 
-	addr = write_request.addr >> 2;
-	word_select = write_request.addr & 3;
-	mem_buff = data_mem[addr];
-	switch (word_select)
-      {
-	case 0:
-		mem_buff.data0 = write_request.data;
-		break;
-	case 1:
-		mem_buff.data1 = write_request.data;
-		break;
-	case 2:
-		mem_buff.data2 = write_request.data;
-		break;
-	case 3:
-		mem_buff.data3 = write_request.data;
-		break;
-      }
-	data_mem.Update(addr,mem_buff);
+	address = write_request.addr;
+	mem_buff.data0 = write_request.data0;
+	mem_buff.data1 = write_request.data1;
+	mem_buff.data2 = write_request.data2;
+	mem_buff.data3 = write_request.data3;
+
+	data_mem.Update(address, mem_buff);
 	strcpy(write_reply.instr,"WR");
 	write_reply.source = write_request.source;
 	send_write_reply = true;
@@ -107,12 +96,13 @@ $phase1
    {
 	send_WRITE_REPLY_PKT(to_bus, write_reply);
 	send_write_reply = false;
-	my_state = MEMORY_IDLE;
+ 	my_state = MEMORY_IDLE;
 	dump_state();
-   }
+  }
 
 $report
 
  if ( (reads > 0) || (writes > 0) )
   {printf("MEMORY: %d read accesses, %d write accesses \n", reads, writes);}
+
 

@@ -1,0 +1,82 @@
+crest : position (540,15)
+snoop_title : position (175,380)
+sub_title2 : position (130,435)
+cache_key1 : position (0,180)
+
+CLOCK : position (0,15)
+CPHASE : position (0,15)
+CPHASE : STATES S:ClockS P0:ClockP0 P1:ClockP1
+CPHASE : PARAM cycle MODE VALUE POSITION (70,32)
+
+MEMORY : position (260,10)
+MEMORY : STATES MEMORY_IDLE:memory MEMORY_BUSY:memory_busy
+MEMORY : port to_bus side BOTTOM position 170
+MEMORY : port from_bus side BOTTOM position 80 ICON portu
+
+BUS : position (150,145)
+BUS : port output0 side TOP position 190
+BUS : port input0 side TOP position 280 ICON portd
+BUS : port input1 side BOTTOM position 40 ICON portu
+BUS : port input2 side BOTTOM position 165 ICON portu
+BUS : port input3 side BOTTOM position 290 ICON portu
+BUS : port input4 side BOTTOM position 415 ICON portu
+BUS : port output1 side BOTTOM position 60
+BUS : port output2 side BOTTOM position 185
+BUS : port output3 side BOTTOM position 310
+BUS : port output4 side BOTTOM position 435
+
+CACHE1 : position (155,220)
+CACHE1 : STATES CACHE_IDLE:cache CACHE_BUSY:cache_busy  BUS_MAST: bus_mast CACHE_INV:cache_upd
+CACHE1 : param Status mode VALUE position (30,40)
+CACHE1 : port to_proc side BOTTOM position 55
+CACHE1 : port from_proc side BOTTOM position 35 ICON portu
+CACHE1 : port to_bus side TOP position 35
+CACHE1 : port from_bus side TOP position 55 ICON portd
+
+CACHE2 : position (280,220)
+CACHE2 : STATES CACHE_IDLE:cache CACHE_BUSY:cache_busy  BUS_MAST: bus_mast CACHE_INV:cache_upd
+CACHE2 : param Status mode VALUE position (30,40)
+CACHE2 : port to_proc side BOTTOM position 55
+CACHE2 : port from_proc side BOTTOM position 35 ICON portu
+CACHE2 : port to_bus side TOP position 35
+CACHE2 : port from_bus side TOP position 55 ICON portd
+
+CACHE3 : position (405,220)
+CACHE3 : STATES CACHE_IDLE:cache CACHE_BUSY:cache_busy  BUS_MAST: bus_mast CACHE_INV:cache_upd
+CACHE3 : param Status mode VALUE position (30,40)
+CACHE3 : port to_proc side BOTTOM position 55
+CACHE3 : port from_proc side BOTTOM position 35 ICON portu
+CACHE3 : port to_bus side TOP position 35
+CACHE3 : port from_bus side TOP position 55 ICON portd
+
+CACHE4 : position (530,220)
+CACHE4 : STATES CACHE_IDLE:cache CACHE_BUSY:cache_busy  BUS_MAST: bus_mast CACHE_INV:cache_upd
+CACHE4 : param Status mode VALUE position (30,40)
+CACHE4 : port to_proc side BOTTOM position 55
+CACHE4 : port from_proc side BOTTOM position 35 ICON portu
+CACHE4 : port to_bus side TOP position 35
+CACHE4 : port from_bus side TOP position 55 ICON portd
+
+PROC1 : position (155,325)
+PROC1 : STATES PROC_IDLE:proc PROC_BUSY:proc_busy
+PROC1 : param current_line mode VALUE position (20, 30)
+PROC1 : port to_cache side TOP position 35
+PROC1 : port from_cache side TOP position 55 ICON portd
+
+PROC2 : position (280,325)
+PROC2 : STATES PROC_IDLE:proc PROC_BUSY:proc_busy
+PROC2 : param current_line mode VALUE position (20, 30)
+PROC2 : port to_cache side TOP position 35
+PROC2 : port from_cache side TOP position 55 ICON portd
+
+PROC3 : position (405,325)
+PROC3 : STATES PROC_IDLE:proc PROC_BUSY:proc_busy
+PROC3 : param current_line mode VALUE position (20, 30)
+PROC3 : port to_cache side TOP position 35
+PROC3 : port from_cache side TOP position 55 ICON portd
+
+PROC4 : position (530,325)
+PROC4 : STATES PROC_IDLE:proc PROC_BUSY:proc_busy
+PROC4 : param current_line mode VALUE position (20, 30)
+PROC4 : port to_cache side TOP position 35
+PROC4 : port from_cache side TOP position 55 ICON portd

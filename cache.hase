@@ -1,11 +1,11 @@
-// Project:	Snoopy Cache Coherence V4: Write Through / Write Invalidate / No Write Allocate
+// Project:	Snoopy Cache Coherence V5: Write Through / Write Invalidate/ Write Allocate
 // Entity	Cache
 // File	cache.hase
-// Date:	Dec 2006, revised Nov 2010, Apr 2019
+// Date:	Dec 2006, revised Nov 2010,  Apr 2019
 // Author:	Roland Ibbett
 
 /* 
-Each line in the cache contains the following (integer) fields in each of its lines:
+Each line in the cache contains the following (integer) fields in each of its  lines:
 Valid
 Address
 Data0
@@ -25,7 +25,7 @@ Instruction, which can be one of the following:
 MR	Memory Read Request
 RR	Read Response from Memory - includes data
 MW	Memory Write Request
-WR	Write Response from Memory 
+WR	Write Response from Memory
 
 A cache receives packets from its processor and from the bus.
 A packet from a processor can be a read request or a write request.
@@ -39,10 +39,12 @@ RM 		- issue Memory Read (MR)
 WH		- Issue Memory Write (MW) 
 		- when memory replies (WR), write data to cache and send acknowledge to processor
 
-WM		- Write data to memory - no write allocate, so don't write to cache
-		- when memory replies (WR), send acknowledge to processor
+WM		- Write Allocate, so first  issue Memory Read (MR)
+		- Write data to memory
+		- when memory replies (WR), update cache and send acknowledge to processor
 
-MW pkt	- if address matches a valid line, invalidate that line
+MW	pkt	- if address matches a valid line, invalidate that line
+
 */
 
 $class_decls
@@ -52,7 +54,7 @@ $class_decls
   bus * myBus;
 
 bool BusMaster;
-bool read_request, read_hit, write_request, write_hit,  no_request;
+bool read_request, read_hit, write_request, write_hit, no_request;
 bool request_bus_control;
 bool send_r_to_bus, send_w_to_bus, send_to_proc;
 bool force_recheck;
@@ -107,9 +109,8 @@ void cache::handle_read()
   if  ((cache_buff.address == proc_line_address) && (cache_buff.valid == 1))
    {
 	// read hit - select data word from cache line and send to processor
-   read_hit = true;
+    read_hit = true;
     strcpy(Status, "RH");
-    dump_state();
     switch (word_select)
       {
 	case 0:
@@ -127,26 +128,25 @@ void cache::handle_read()
       }
     send_to_proc = true;
     read_request = false;
-    }
+    }					// end of read hit
   else
-   {
-		// read miss - send Memory Read Request to bus, address = full address from proc
-	 strcpy (bus_read_request.instr,"MR");
-	 bus_read_request.addr = pkt_from_proc.addr;
+   {					// read miss - send Memory Read Request to bus
 	 strcpy(Status, "RM");
+	 strcpy (bus_read_request.instr,"MR");
+	 bus_read_request.addr = proc_line_address;
 	 bus_read_request.source = own_no;
 	 send_r_to_bus = true;
 	 request_bus_control = true;
    }						// end of read miss
 	 dump_state();
-}	// end of handle read
+}						// end of handle read
 
 void cache::handle_write()
 {
 /* 
 	Called when the cache receives a Write Request; result may be a Write Hit (WH) or Write Miss (WM)
 	WH:
-		If  cache_buff.address = pkt_from_proc.addr & Valid = 1
+		If  cache_buff.address = proc_line_address & Valid = 1
 	WM:
 		If Valid = 0: WM
 		or
@@ -158,11 +158,23 @@ void cache::handle_write()
   proc_cache_line = proc_line_address & line_mask;
   cache_buff = cache_mem[proc_cache_line];
   word_select = pkt_from_proc.addr & 3;
-  bus_write_request.data = pkt_from_proc.data;
 
-  if  ((cache_buff.address == proc_line_address) && (cache_buff.valid == 1))
+  if  ( (cache_buff.address != proc_line_address) || (cache_buff.valid == 0) )
    {
-					// write hit - update cache when Memory Write Reply arrives
+					// write miss - fetch word from Memory
+    strcpy(Status, "WM");
+    dump_state();
+    strcpy (bus_read_request.instr,"MR");
+    bus_read_request.addr = proc_line_address;
+    bus_read_request.source = own_no;
+    send_r_to_bus = true;
+    request_bus_control = true;
+   } 
+
+  if  ( (cache_buff.address == proc_line_address) && (cache_buff.valid == 1) )
+					// write hit - send updated cache_buff to Memory
+					// update cache when Memory Write Reply arrives
+   {
     write_hit = true;
     strcpy(Status, "WH");
     dump_state();
@@ -181,23 +193,25 @@ void cache::handle_write()
 		cache_buff.data3 = pkt_from_proc.data;
 		break;
       }
-    }
-  else											// write miss
-    {strcpy(Status, "WM");}
-     dump_state(); 
-// write hit or write miss - send Write Request to Memory - write through action
     strcpy (bus_write_request.instr,"MW");	
-    bus_write_request.addr = pkt_from_proc.addr;
+    bus_write_request.addr = proc_line_address;
+    bus_write_request.data0 = cache_buff.data0;
+    bus_write_request.data1 = cache_buff.data1;
+    bus_write_request.data2 = cache_buff.data2;
+    bus_write_request.data3 = cache_buff.data3;
     bus_write_request.source = own_no;
     send_w_to_bus = true;
     request_bus_control = true;
-}	// end of handle write
+    }							// end of write hit
+}							// end of handle write
 
 void cache::handle_read_reply()
 {
 
-// 	When an RR packet is received, the data is written to the selected line cache and
-//	the required value from within the line is forwarded to the processor.
+// 	When an RR packet is received, the data is copied into cache_buff.
+//	If the reply is for a Read Request, the data in cache_buff is written to the selected line cache
+//	and the required value from within the line is forwarded to the processor.
+//	Otherwise the reply is for a Write Allocate request, so cache_buff is updated with the value from proc
 
 	 cache_buff.valid = 1;
 	 cache_buff.address = proc_line_address;
@@ -205,8 +219,10 @@ void cache::handle_read_reply()
 	 cache_buff.data1 = read_reply.data1;
 	 cache_buff.data2 = read_reply.data2;
 	 cache_buff.data3 = read_reply.data3;
-	 cache_mem.Update(proc_cache_line,cache_buff);
 
+ if (read_request)
+  {
+    cache_mem.Update(proc_cache_line,cache_buff);
     switch (word_select)
       {
 	case 0:
@@ -224,24 +240,11 @@ void cache::handle_read_reply()
       }
    send_to_proc = true;
    read_request = false;
-   myBus->BusBusy = false;	// release bus
+   myBus->BusBusy = false;			// release bus
    BusMaster = false;
- }		// end of handle_read_reply
-
-void cache::handle_write_reply()
-{
-/*
- 	When a WR packet is received, the action that occurs depends on whether or not the write request
-	from the processor caused a Write Hit .
-	WH:
-		Write data to appropriate word in line
-	WH or WM:
-		Send Ack to processor
-*/
-
- if (write_hit)
+  }
+ else								//  read request for write allocate
   {
-    cache_buff.valid = 1;
     switch (word_select)
       {
 	case 0:
@@ -256,31 +259,52 @@ void cache::handle_write_reply()
 	case 3:
 		cache_buff.data3 = pkt_from_proc.data;
 		break;
-      }
-	    cache_mem.Update(proc_cache_line,cache_buff);
-  }
+       }
+    strcpy (bus_write_request.instr,"MW");	
+    bus_write_request.addr = proc_line_address;
+    bus_write_request.data0 = cache_buff.data0;
+    bus_write_request.data1 = cache_buff.data1;
+    bus_write_request.data2 = cache_buff.data2;
+    bus_write_request.data3 = cache_buff.data3;
+    bus_write_request.source = own_no;
+    send_w_to_bus = true;
+   }									//  end of read request for write allocate
+ }									// end of handle_read_reply
+
+void cache::handle_write_reply()
+{
+// 	When a WR packet is received, the values in cache_buff are written into the Cache
+//	and an Acknowledge is sent to the processor
+
+  cache_buff.valid = 1;
+  cache_mem.Update(proc_cache_line,cache_buff);
   pkt_to_proc = 0;
   send_to_proc = true;
   write_request = false;
-  myBus->BusBusy = false;	// release bus
+  myBus->BusBusy = false;				// release bus
   BusMaster = false;
- }	// end of handle_write_reply
+ }									// end of handle_write_reply
 
-void cache::invalidate()				// invalidate a matching line if it's valid 
+void cache::invalidate()					// invalidate a matching line if it's valid 
 {
-  bus_line_address = invalidate_request.addr >> 2;
+  bus_line_address = invalidate_request.addr;
   bus_cache_line = bus_line_address & line_mask;
   bus_buff = cache_mem[bus_cache_line];
   if ( (bus_buff.address == bus_line_address) && (bus_buff.valid == 1) )
    {
-   old_state = my_state;
+    old_state = my_state;
     strcpy(Status, "INV");
     my_state = CACHE_INV;
     dump_state_i();
     bus_buff.valid = 0;
     cache_mem.Update(bus_cache_line, bus_buff);
     if (read_request || write_request)
-     {force_recheck = true;}
+     {
+      request_bus_control = false;
+      send_r_to_bus = false;
+      send_w_to_bus = false;
+      force_recheck = true;
+     }
     else
       {no_request = true;}
    }
@@ -288,17 +312,17 @@ void cache::invalidate()				// invalidate a matching line if it's valid
 
 void cache::recheck_cache(){
 
-//  If a cache line is invalidated by a Write Request from another cache,
+//  If a cache line is updated by a Write Request from another cache,
 //  it must re-check any outstanding processor requests at the start of the next clock period.
 
 	request_bus_control = false;
 	my_state = old_state;
 	dump_state_i();
-	force_recheck = false;  
 	if (read_request) 
 	   {handle_read();}
 	if (write_request)
 	   {handle_write();}
+	force_recheck = false;  
 }
 
 $pre
@@ -313,8 +337,8 @@ myBus = (bus*)sim.get_entity(sim.get_entity_id("BUS"));
   read_request = false;
   read_hit = false;
   write_request = false;
-  no_request = false;
   write_hit = false;
+  write_request = false;  no_request = false;
   send_r_to_bus = false;
   send_w_to_bus = false;
   send_to_proc = false;
@@ -358,7 +382,7 @@ $phase0
     if (ev.type() == READ_MEM_PKT)						// ignore
      {SIM_CAST_DEL(t_read_mem, ignored_pkt,ev);}
 
-    if (ev.type() == WRITE_MEM_PKT)						// invalidate a valid matching entry
+    if (ev.type() == WRITE_MEM_PKT)						//invalidate a valid matching entry
      {
 	SIM_CAST_DEL(t_write_mem, invalidate_request,ev);
 	invalidate();
@@ -442,8 +466,8 @@ $phase1
 
   if (BusMaster)
    {
-    my_state = BUS_MAST;
-    dump_state();
+     my_state = BUS_MAST;
+     dump_state();
      if (send_r_to_bus)
       {
 	send_READ_MEM_PKT(to_bus, bus_read_request);
@@ -460,13 +484,13 @@ $phase1
      if (send_to_proc)
       {
        send_PROC_PKT_I(to_proc, pkt_to_proc);
-       if ( read_hit || write_hit)
-        {
+       done = true;
+       if (read_hit || write_hit)
+       {
 	hits ++;
 	read_hit = false;
 	write_hit = false;
        }
-       done = true;
        send_to_proc = false;
       }
   if (no_request || (nodes_done == 4))
@@ -494,8 +518,5 @@ $report
   if(accesses > 0)
    {
     hit_rate = 100 * hits / accesses;
-    printf("CACHE%d: %d accesses,  hit rate = %d%% \n", own_no, accesses, hit_rate);
-//    for (count =0; count<8; count++)
-//   {printf("Line %d: %d %d %d %d %d %d \n", count, cache_mem[count].valid, cache_mem[count].address, cache_mem[count].data0, cache_mem[count].data1, cache_mem[count].data2, cache_mem[count].data3);}
+    printf("CACHE%d %d accesses,  hit rate = %d%% \n", own_no, accesses, hit_rate);
    }
-
