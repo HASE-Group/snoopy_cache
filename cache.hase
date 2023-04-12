@@ -1,0 +1,501 @@
+// Project:	Snoopy Cache Coherence V4: Write Through / Write Invalidate / No Write Allocate
+// Entity	Cache
+// File	cache.hase
+// Date:	Dec 2006, revised Nov 2010, Apr 2019
+// Author:	Roland Ibbett
+
+/* 
+Each line in the cache contains the following (integer) fields in each of its lines:
+Valid
+Address
+Data0
+Data1
+Data2
+Data3
+
+Bus packets can contain the following fields:
+Address
+Data0
+Data1
+Data2
+Data3
+Source: Number of the originating cache
+Instruction, which can be one of the following:
+
+MR	Memory Read Request
+RR	Read Response from Memory - includes data
+MW	Memory Write Request
+WR	Write Response from Memory 
+
+A cache receives packets from its processor and from the bus.
+A packet from a processor can be a read request or a write request.
+The actions that occur depend on the current state of the line.
+
+RH		- supply data to processor, state remains unchanged
+
+RM 		- issue Memory Read (MR)
+		- when memory replies (RR), update cache with data and supply  to processor
+
+WH		- Issue Memory Write (MW) 
+		- when memory replies (WR), write data to cache and send acknowledge to processor
+
+WM		- Write data to memory - no write allocate, so don't write to cache
+		- when memory replies (WR), send acknowledge to processor
+
+MW pkt	- if address matches a valid line, invalidate that line
+*/
+
+$class_decls
+
+// entity reference
+
+  bus * myBus;
+
+bool BusMaster;
+bool read_request, read_hit, write_request, write_hit,  no_request;
+bool request_bus_control;
+bool send_r_to_bus, send_w_to_bus, send_to_proc;
+bool force_recheck;
+bool done;
+
+char bus_instr[5], proc_instr[5];
+
+int count;
+int own_no;
+char * name;
+int line,  line_mask, word_select;
+int bus_cache_line, bus_line_address;
+int proc_cache_line, proc_line_address;
+int pkt_to_proc;
+int accesses, hits, hit_rate;
+int old_state;
+
+t_cache_struct cache_buff, bus_buff;
+t_mem_trace pkt_from_proc;
+t_read_mem bus_read_request, ignored_pkt;
+t_write_mem bus_write_request, invalidate_request;
+t_read_reply read_reply;
+t_write_reply write_reply;
+
+void handle_read();
+void handle_write();
+void handle_read_reply();
+void handle_write_reply();
+void invalidate();
+void recheck_cache();
+
+$class_defs
+
+void cache::handle_read()
+{	
+/*
+	Called when the cache receives a Read Request; result may be a Read Hit (RH) or Read Miss (RM)
+	RH:
+		If  cache_buff.address = pkt_from_proc.addr & Valid = 1
+	RM:
+		If Valid = 0
+		or
+		If Valid = 1 & cache_buff.address != pkt_from_proc.addr
+*/
+  read_request = true;
+  Address = pkt_from_proc.addr;
+  proc_line_address = pkt_from_proc.addr >> 2;
+  proc_cache_line = proc_line_address & line_mask;
+  cache_buff = cache_mem[proc_cache_line];
+  word_select = pkt_from_proc.addr & 3;
+
+  if  ((cache_buff.address == proc_line_address) && (cache_buff.valid == 1))
+   {
+	// read hit - select data word from cache line and send to processor
+   read_hit = true;
+    strcpy(Status, "RH");
+    dump_state();
+    switch (word_select)
+      {
+	case 0:
+		pkt_to_proc = cache_buff.data0;
+		break;
+	case 1:
+		pkt_to_proc = cache_buff.data1;
+		break;
+	case 2:
+		pkt_to_proc = cache_buff.data2;
+		break;
+	case 3:
+		pkt_to_proc = cache_buff.data3;
+		break;
+      }
+    send_to_proc = true;
+    read_request = false;
+    }
+  else
+   {
+		// read miss - send Memory Read Request to bus, address = full address from proc
+	 strcpy (bus_read_request.instr,"MR");
+	 bus_read_request.addr = pkt_from_proc.addr;
+	 strcpy(Status, "RM");
+	 bus_read_request.source = own_no;
+	 send_r_to_bus = true;
+	 request_bus_control = true;
+   }						// end of read miss
+	 dump_state();
+}	// end of handle read
+
+void cache::handle_write()
+{
+/* 
+	Called when the cache receives a Write Request; result may be a Write Hit (WH) or Write Miss (WM)
+	WH:
+		If  cache_buff.address = pkt_from_proc.addr & Valid = 1
+	WM:
+		If Valid = 0: WM
+		or
+		Valid = 1 & cache_buff.address != pkt_from_proc.addr
+ */
+  write_request = true;
+  Address = pkt_from_proc.addr;
+  proc_line_address = pkt_from_proc.addr >> 2;
+  proc_cache_line = proc_line_address & line_mask;
+  cache_buff = cache_mem[proc_cache_line];
+  word_select = pkt_from_proc.addr & 3;
+  bus_write_request.data = pkt_from_proc.data;
+
+  if  ((cache_buff.address == proc_line_address) && (cache_buff.valid == 1))
+   {
+					// write hit - update cache when Memory Write Reply arrives
+    write_hit = true;
+    strcpy(Status, "WH");
+    dump_state();
+    switch (word_select)
+      {
+	case 0:
+		cache_buff.data0 = pkt_from_proc.data;
+		break;
+	case 1:
+		cache_buff.data1 = pkt_from_proc.data;
+		break;
+	case 2:
+		cache_buff.data2 = pkt_from_proc.data;
+		break;
+	case 3:
+		cache_buff.data3 = pkt_from_proc.data;
+		break;
+      }
+    }
+  else											// write miss
+    {strcpy(Status, "WM");}
+     dump_state(); 
+// write hit or write miss - send Write Request to Memory - write through action
+    strcpy (bus_write_request.instr,"MW");	
+    bus_write_request.addr = pkt_from_proc.addr;
+    bus_write_request.source = own_no;
+    send_w_to_bus = true;
+    request_bus_control = true;
+}	// end of handle write
+
+void cache::handle_read_reply()
+{
+
+// 	When an RR packet is received, the data is written to the selected line cache and
+//	the required value from within the line is forwarded to the processor.
+
+	 cache_buff.valid = 1;
+	 cache_buff.address = proc_line_address;
+	 cache_buff.data0 = read_reply.data0;
+	 cache_buff.data1 = read_reply.data1;
+	 cache_buff.data2 = read_reply.data2;
+	 cache_buff.data3 = read_reply.data3;
+	 cache_mem.Update(proc_cache_line,cache_buff);
+
+    switch (word_select)
+      {
+	case 0:
+		pkt_to_proc = cache_buff.data0;
+		break;
+	case 1:
+		pkt_to_proc = cache_buff.data1;
+		break;
+	case 2:
+		pkt_to_proc = cache_buff.data2;
+		break;
+	case 3:
+		pkt_to_proc = cache_buff.data3;
+		break;
+      }
+   send_to_proc = true;
+   read_request = false;
+   myBus->BusBusy = false;	// release bus
+   BusMaster = false;
+ }		// end of handle_read_reply
+
+void cache::handle_write_reply()
+{
+/*
+ 	When a WR packet is received, the action that occurs depends on whether or not the write request
+	from the processor caused a Write Hit .
+	WH:
+		Write data to appropriate word in line
+	WH or WM:
+		Send Ack to processor
+*/
+
+ if (write_hit)
+  {
+    cache_buff.valid = 1;
+    switch (word_select)
+      {
+	case 0:
+		cache_buff.data0 = pkt_from_proc.data;
+		break;
+	case 1:
+		cache_buff.data1 = pkt_from_proc.data;
+		break;
+	case 2:
+		cache_buff.data2 = pkt_from_proc.data;
+		break;
+	case 3:
+		cache_buff.data3 = pkt_from_proc.data;
+		break;
+      }
+	    cache_mem.Update(proc_cache_line,cache_buff);
+  }
+  pkt_to_proc = 0;
+  send_to_proc = true;
+  write_request = false;
+  myBus->BusBusy = false;	// release bus
+  BusMaster = false;
+ }	// end of handle_write_reply
+
+void cache::invalidate()				// invalidate a matching line if it's valid 
+{
+  bus_line_address = invalidate_request.addr >> 2;
+  bus_cache_line = bus_line_address & line_mask;
+  bus_buff = cache_mem[bus_cache_line];
+  if ( (bus_buff.address == bus_line_address) && (bus_buff.valid == 1) )
+   {
+   old_state = my_state;
+    strcpy(Status, "INV");
+    my_state = CACHE_INV;
+    dump_state_i();
+    bus_buff.valid = 0;
+    cache_mem.Update(bus_cache_line, bus_buff);
+    if (read_request || write_request)
+     {force_recheck = true;}
+    else
+      {no_request = true;}
+   }
+}
+
+void cache::recheck_cache(){
+
+//  If a cache line is invalidated by a Write Request from another cache,
+//  it must re-check any outstanding processor requests at the start of the next clock period.
+
+	request_bus_control = false;
+	my_state = old_state;
+	dump_state_i();
+	force_recheck = false;  
+	if (read_request) 
+	   {handle_read();}
+	if (write_request)
+	   {handle_write();}
+}
+
+$pre
+
+// set up pointer to bus
+
+myBus = (bus*)sim.get_entity(sim.get_entity_id("BUS"));
+
+  BusMaster = false;
+  done = false;
+  request_bus_control = false;
+  read_request = false;
+  read_hit = false;
+  write_request = false;
+  no_request = false;
+  write_hit = false;
+  send_r_to_bus = false;
+  send_w_to_bus = false;
+  send_to_proc = false;
+  force_recheck = false;
+
+  name = get_name();
+  if (strcmp(name,"CACHE1")==0) {own_no=1;}
+  if (strcmp(name,"CACHE2")==0) {own_no=2;}
+  if (strcmp(name,"CACHE3")==0) {own_no=3;}
+  if (strcmp(name,"CACHE4")==0) {own_no=4;}
+
+// Initialise Cache, setting all cache line values to 0
+
+  line_mask = Cache_size - 1;
+  accesses = 0;
+  hits = 0;
+  hit_rate = 0;
+
+  cache_buff.valid = 0;
+  cache_buff.address = 0;
+  cache_buff.data0 = 0;
+  cache_buff.data1 = 0;
+  cache_buff.data2 = 0;
+  cache_buff.data3 = 0;
+  for (count=0;count<Cache_size;count++)
+    {cache_mem.Update(count,cache_buff);}
+
+  my_state = CACHE_IDLE;
+  dump_state();
+
+$phase0
+
+  sim_from_port P_Input(from_proc);	    
+  sim_from_port B_Input(from_bus);	    
+
+ if (force_recheck)
+    {recheck_cache();}
+
+  if  (sim_waiting(ev, B_Input) > 0)  //pkt from bus
+   {
+    if (ev.type() == READ_MEM_PKT)						// ignore
+     {SIM_CAST_DEL(t_read_mem, ignored_pkt,ev);}
+
+    if (ev.type() == WRITE_MEM_PKT)						// invalidate a valid matching entry
+     {
+	SIM_CAST_DEL(t_write_mem, invalidate_request,ev);
+	invalidate();
+     }
+    if (ev.type() == READ_REPLY_PKT)						// update cache if source = own_no
+     {
+	SIM_CAST_DEL(t_read_reply, read_reply,ev);
+	if  (read_reply.source == own_no)
+	 {handle_read_reply();}
+     }
+
+    if (ev.type() == WRITE_REPLY_PKT)						// send Ack to proc if source = own_no
+     {
+	SIM_CAST_DEL(t_write_reply, write_reply,ev);
+	if (write_reply.source == own_no)
+	 {handle_write_reply();}
+     }
+   }
+
+  if  (sim_waiting(ev, P_Input) > 0)	// pkt from processor
+   {
+    nodes_done_mutex.Lock();
+    nodes_done--;
+    dump_globals();
+    nodes_done_mutex.Unlock(); 
+    accesses ++;
+    my_state = CACHE_BUSY;
+    dump_state_i();
+    SIM_CAST(t_mem_trace, pkt_from_proc,ev);
+    strcpy(proc_instr,pkt_from_proc.instr);
+    if  (strcmp(proc_instr,"R") == 0)
+	 {handle_read();}
+	if (strcmp(proc_instr,"r") == 0)
+	 {handle_read();}
+	if (strcmp(proc_instr,"W") == 0)
+	  {handle_write();}
+	if (strcmp(proc_instr,"w") == 0)
+	  {handle_write();}
+    }
+
+$phase1
+
+  if (request_bus_control)
+   {
+    if (own_no == 1)
+      {myBus->C1_request = true;}
+    else if (own_no == 2)
+      {myBus->C2_request = true;}
+    else if (own_no == 3)
+      {myBus->C3_request = true;}
+    else if (own_no == 4)
+      {myBus->C4_request = true;}
+    request_bus_control = false;
+   }
+
+  sim_hold(2);
+
+  if ((own_no == 1) && (myBus->BusGrant1))
+   {
+     BusMaster = true;
+     myBus->BusGrant1 = false;
+   }
+
+  if ((own_no == 2) && (myBus->BusGrant2))
+   {
+     BusMaster = true;
+     myBus->BusGrant2 = false;
+   }
+
+  if ((own_no == 3) && (myBus->BusGrant3))
+   {
+     BusMaster = true;
+     myBus->BusGrant3 = false;
+   }
+
+  if ((own_no == 4) && (myBus->BusGrant4))
+   {
+     BusMaster = true;
+     myBus->BusGrant4 = false;
+   }
+
+  if (BusMaster)
+   {
+    my_state = BUS_MAST;
+    dump_state();
+     if (send_r_to_bus)
+      {
+	send_READ_MEM_PKT(to_bus, bus_read_request);
+        send_r_to_bus = false;
+      }
+
+     if (send_w_to_bus)
+      {
+	send_WRITE_MEM_PKT(to_bus, bus_write_request);
+        send_w_to_bus = false;
+      }
+    }
+
+     if (send_to_proc)
+      {
+       send_PROC_PKT_I(to_proc, pkt_to_proc);
+       if ( read_hit || write_hit)
+        {
+	hits ++;
+	read_hit = false;
+	write_hit = false;
+       }
+       done = true;
+       send_to_proc = false;
+      }
+  if (no_request || (nodes_done == 4))
+   {
+    strcpy(Status, "__");
+    my_state = CACHE_IDLE;
+    dump_state_i();
+    no_request = false;
+   }
+
+  if (done)
+   {
+    strcpy(Status, "__");
+    my_state = CACHE_IDLE;
+    dump_state_i();
+    nodes_done_mutex.Lock();
+    nodes_done++;
+    dump_globals();
+    nodes_done_mutex.Unlock();
+    done = false;
+   }
+
+$report
+
+  if(accesses > 0)
+   {
+    hit_rate = 100 * hits / accesses;
+    printf("CACHE%d: %d accesses,  hit rate = %d%% \n", own_no, accesses, hit_rate);
+//    for (count =0; count<8; count++)
+//   {printf("Line %d: %d %d %d %d %d %d \n", count, cache_mem[count].valid, cache_mem[count].address, cache_mem[count].data0, cache_mem[count].data1, cache_mem[count].data2, cache_mem[count].data3);}
+   }
+

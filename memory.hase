@@ -1,0 +1,118 @@
+// Project:		Snoopy Cache Coherence
+// Entity		Memory
+// File		memory.hase
+// Date:		Sept 2006, modified Apr 2019
+// Author:		Roland Ibbett
+
+// The Memory receives Read and Write requests from the caches.
+// Each line in the Memory contains  4 integer values
+
+$class_decls
+
+bool send_read_reply, send_write_reply;
+char instr[5];
+int access_time, addr, word_select;
+int reads, writes;
+
+t_mem_struct data_in, mem_buff;
+t_read_mem read_request;
+t_write_mem write_request;
+t_read_reply read_reply;
+t_write_reply write_reply;
+
+$class_defs
+
+$pre
+
+  send_read_reply = false;
+  send_write_reply = false;
+  reads = 0;
+  writes = 0;
+  my_state = MEMORY_IDLE;
+  dump_state();
+
+$phase0
+
+  sim_from_port Input(from_bus);	    
+
+  if  (sim_waiting(ev, Input) > 0)
+   {
+    if (ev.type() == READ_MEM_PKT)
+     {
+	SIM_CAST_DEL(t_read_mem, read_request,ev);
+
+//  The Memory returns a Read Response (RR) packet to the bus containing the requested data
+//  and with the same source address as that in the incoming packet.
+
+	addr = read_request.addr >> 2;
+	strcpy(read_reply.instr,"RR");
+	read_reply.data0 = data_mem[addr].data0;
+	read_reply.data1 = data_mem[addr].data1;
+	read_reply.data2 = data_mem[addr].data2;
+	read_reply.data3 = data_mem[addr].data3;
+	read_reply.source = read_request.source;
+	send_read_reply = true;
+	access_time = 4;
+	reads ++;
+     }		// end of read packet
+
+    if (ev.type() == WRITE_MEM_PKT)
+     {
+	SIM_CAST_DEL(t_write_mem, write_request,ev);
+
+// The Memory writes the incoming data and sends an ACK packet to the bus
+
+	addr = write_request.addr >> 2;
+	word_select = write_request.addr & 3;
+	mem_buff = data_mem[addr];
+	switch (word_select)
+      {
+	case 0:
+		mem_buff.data0 = write_request.data;
+		break;
+	case 1:
+		mem_buff.data1 = write_request.data;
+		break;
+	case 2:
+		mem_buff.data2 = write_request.data;
+		break;
+	case 3:
+		mem_buff.data3 = write_request.data;
+		break;
+      }
+	data_mem.Update(addr,mem_buff);
+	strcpy(write_reply.instr,"WR");
+	write_reply.source = write_request.source;
+	send_write_reply = true;
+	access_time = 4;
+	writes ++;
+       }		// end of write packet
+  my_state = MEMORY_BUSY;
+  }
+  dump_state();
+
+$phase1
+
+  if (access_time > 0)
+   {access_time  --;}
+  if ( (send_read_reply) && (access_time == 0) )
+   {
+	send_READ_REPLY_PKT(to_bus, read_reply);
+	send_read_reply = false;
+	my_state = MEMORY_IDLE;
+	dump_state();
+   }
+
+  if ( (send_write_reply) &&  (access_time == 0) )
+   {
+	send_WRITE_REPLY_PKT(to_bus, write_reply);
+	send_write_reply = false;
+	my_state = MEMORY_IDLE;
+	dump_state();
+   }
+
+$report
+
+ if ( (reads > 0) || (writes > 0) )
+  {printf("MEMORY: %d read accesses, %d write accesses \n", reads, writes);}
+

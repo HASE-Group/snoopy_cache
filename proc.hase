@@ -1,0 +1,96 @@
+// Project		Snoopy Cache Coherence
+// Entity		Processor
+// File		proc.hase
+// Date:		Aug 2005, revised Sept 2006, May 2016
+// Author:	Roland Ibbett
+
+$class_decls
+
+//Variable definitions
+ 
+  bool send_pkt, waiting, finished;
+  char action;
+  char * name;
+  int TC, max_address, own_no;
+
+  t_mem_trace pkt_to_cache, pkt_from_cache;
+
+$pre
+
+  name = get_name();
+  if (strcmp(name,"PROC1")==0) {own_no=1;}
+  if (strcmp(name,"PROC2")==0) {own_no=2;}
+  if (strcmp(name,"PROC3")==0) {own_no=3;}
+  if (strcmp(name,"PROC4")==0) {own_no=4;}
+
+  my_state = PROC_IDLE;
+  dump_state();
+  TC = 0;
+  finished = false;
+  waiting = false;
+
+//Get first instruction
+  current_line=mem_trace[TC];
+  action = (char) current_line.instr[0];
+    if  ((action == 'R') || (action == 'r')
+      || (action == 'W') || (action == 'w'))
+	 {my_state = PROC_BUSY;
+	  dump_state();
+	  send_pkt = true;}
+    else
+	{
+	 finished = true;
+	 nodes_done_mutex.Lock();
+	 nodes_done++;
+	 dump_globals();
+	 nodes_done_mutex.Unlock();
+
+	}
+
+$phase0
+
+  sim_from_port Input(from_cache);
+	    
+  if  (sim_waiting(ev, Input) > 0)
+  {
+	TC++;
+	current_line=mem_trace[TC];
+	action = (char) current_line.instr[0];
+	waiting = false;
+  }
+
+  if (!waiting)
+   {
+    if  ((action == 'R') || (action == 'r')
+      || (action == 'W') || (action == 'w'))
+     {
+	strcpy(pkt_to_cache.instr,current_line.instr);
+	pkt_to_cache.addr = current_line.addr;
+	pkt_to_cache.data = current_line.data;
+	waiting = true;
+	send_pkt = true;
+     }
+    else
+     {
+	if (!finished)
+	 {
+	  my_state = PROC_IDLE;
+	  dump_state();
+	  finished = true;
+	 nodes_done_mutex.Lock();
+	 nodes_done++;
+	 dump_globals();
+	 nodes_done_mutex.Unlock();
+
+	 }
+     }
+   }
+	
+$phase1
+
+  if (send_pkt)
+   {
+    send_PROC_PKT_O(to_cache,pkt_to_cache);
+    send_pkt = false;
+   }
+

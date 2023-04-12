@@ -1,0 +1,181 @@
+// Project:	Snoopy Cache
+// Entity	Bus
+// File		bus.hase
+// Date:	Dec 2006
+
+/* 
+
+The Bus has five pairs of inputs and outputs, one pair for each of the
+caches and one for the Memory. Access to the Bus is controlled by a
+request/grant mechanism, together with a round-robin priority
+system. Each cache can make requests to take ownership of the bus but,
+at any one time, only one request can be granted. Whilst a particular
+cache has ownership of the Bus, it can send packets to and receive
+packets from the Memory. Because the Memory only sends packets in
+response to cache requests, it does not need Bus ownership. Likewise,
+when a packet sends out Read or Write requests to check for the
+presence of a modified copy in another cache of the data it requires,
+a responding cache (there can only be one) does not need Bus
+ownership.
+
+The Bus in only active in Phase 1 of the system clock.
+*/
+
+$class_decls
+
+ Clock * myClock;
+
+//structures and variables
+
+// bus_struct bus_pkt;
+
+bool BusBusy, C1_request, C2_request, C3_request, C4_request, M_request;
+bool BusGrant1, BusGrant2, BusGrant3, BusGrant4;
+bool done, time_out;
+int i, priority;
+int clock_cycle;
+
+t_read_mem read_request;
+t_write_mem write_request;
+t_read_reply read_reply;
+t_write_reply write_reply;
+
+$pre
+
+ myClock = (Clock*) sim.get_entity( sim.get_entity_id( "CLOCK" ) );
+
+ BusBusy = false;
+ C1_request = false;
+ C2_request = false;
+ C3_request = false;
+ C4_request = false;
+ priority = 1;
+
+$phase0
+// clock_cycle = myClock->cycle / 2;
+// printf("Clock cycle %d Phase 0\n", clock_cycle);
+
+$phase1
+// clock_cycle = myClock->cycle / 2;
+// printf("Clock cycle %d Phase 1\n", clock_cycle);
+
+  int value = 0;
+
+  sim_hold(1);
+
+/* The following code implements a round-robin Bus Grant allocation scheme,
+   using a rotating priority variable. Cache 1 has priority 1, etc.
+   Whenever a cache receives a Bus Grant, the priority is set for the next
+   cache (modulo 4). In any one cycle, the algorithm skips over inactive caches
+*/
+
+  if (!BusBusy)
+   {
+    if ( C1_request && ((priority == 1) || ((priority == 4) && !C4_request)
+         || ((priority == 3) && !C3_request && !C4_request)
+         || ((priority == 2) && !C2_request && !C3_request && !C4_request)) )
+     {
+	BusGrant1 = true; 
+//printf("BUS: setting BusGrant1 = true\n");
+	C1_request = false;
+ 	BusBusy = true;
+	priority = 2;
+     }
+
+    else if ( C2_request && ((priority == 2) || ((priority == 1) && !C1_request)
+         || ((priority == 4) && !C4_request && !C1_request)
+         || ((priority == 3) && !C3_request && !C4_request && !C1_request)) )
+     {
+	BusGrant2 = true; 
+//printf("BUS: setting BusGrant2 = true\n");
+	C2_request = false;
+ 	BusBusy = true;
+	priority = 3;
+     }
+
+    else if ( C3_request && ((priority == 3) || ((priority == 2) && !C2_request)
+         || ((priority == 1) && !C1_request && !C2_request)
+//       || ((priority == 2) && !C2_request && !C1_request && !C2_request)) )
+// coding error corrected Dec 2010
+         || ((priority == 4) && !C2_request && !C1_request && !C2_request)) )
+     {
+	BusGrant3 = true; 
+//printf("BUS: setting BusGrant3 = true\n");
+	C3_request = false;
+ 	BusBusy = true;
+	priority = 4;
+     }
+
+    else if ( C4_request && ((priority == 4) || ((priority == 3) && !C3_request)
+         || ((priority == 2) && !C2_request && !C3_request)
+         || ((priority == 1) && !C1_request && !C2_request && !C3_request)) )
+     {
+	BusGrant4 = true; 
+//printf("BUS: setting BusGrant4 = true\n");
+	C4_request = false;
+ 	BusBusy = true;
+	priority = 1;
+     }
+   }
+
+  sim_hold(5);
+
+  if (sim_waiting(ev, SIM_ANY)>0)
+   {
+    if (ev.type() == READ_MEM_PKT)						// send to all outputs except source
+     {
+	SIM_CAST(t_read_mem, read_request, ev);	
+	for (i=0; i<output_size; i++)
+         {
+	  if (i != read_request.source)
+	   {send_READ_MEM_PKT(output[i], read_request);}
+	 }
+     }
+
+    if (ev.type() == WRITE_MEM_PKT)						// send to all outputs except source
+     {
+	SIM_CAST(t_write_mem, write_request, ev);
+	for (i=0; i<output_size; i++)
+         {
+	  if (i != write_request.source)
+           {send_WRITE_MEM_PKT(output[i], write_request);}
+	 }
+     }
+
+    if (ev.type() == READ_REPLY_PKT)						// send to all outputs except memory
+     {
+	SIM_CAST(t_read_reply, read_reply, ev);
+	for (i=1; i<output_size; i++)
+           {send_READ_REPLY_PKT(output[i], read_reply);}
+     }
+
+    if (ev.type() == WRITE_REPLY_PKT)						// send to all outputs except memory
+     {
+	SIM_CAST(t_write_reply, write_reply, ev);
+	for (i=1; i<output_size; i++)
+           {send_WRITE_REPLY_PKT(output[i], write_reply);}
+     }
+  }
+
+// end of  ClockPhase 1
+
+// stop simulation if nodes (processors and caches) have finished or if Max_Time_Left reaches 0
+
+  if  (nodes_done==4)
+   {done = true;}
+  Max_Time_Left = Max_Time_Left - 20;
+  if (Max_Time_Left <= 0)
+   {time_out = true;}
+ if (done || time_out)
+   {stopSimulation(0);}
+
+$report
+
+if (done)
+ {printf("Simulation complete \n");}
+
+ if (time_out)
+   {printf("Simulation timed out -> increase Max_Time_Left \n");}
+
+
+
