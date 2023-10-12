@@ -10,7 +10,7 @@ $class_decls
  
   bool send_pkt, waiting, finished;
   char action;
-  char * name;
+  const char* name;
   int TC, max_address, own_no;
 
   t_mem_trace pkt_to_cache, pkt_from_cache;
