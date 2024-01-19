@@ -1,7 +1,7 @@
 // Project		Snoopy Cache Coherence
 // Entity		Processor
 // File		proc.hase
-// Date:		Aug 2005, revised Sept 2006, May 2016
+// Date:		Aug 2005, revised Sept 2006, May 2016, Jan 2024
 // Author:	Roland Ibbett
 
 $class_decls
@@ -10,7 +10,7 @@ $class_decls
  
   bool send_pkt, waiting, finished;
   char action;
-  char * name;
+  const char * name;
   int TC, max_address, own_no;
 
   t_mem_trace pkt_to_cache, pkt_from_cache;
