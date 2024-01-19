@@ -64,7 +64,7 @@ char bus_instr[5], proc_instr[5];
 
 int count;
 int own_no;
-char * name;
+const char * name;
 int line,  line_mask, word_select;
 int bus_cache_line, bus_line_address;
 int proc_cache_line, proc_line_address;
